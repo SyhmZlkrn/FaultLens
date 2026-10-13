@@ -15,7 +15,8 @@ from typing import Callable, Literal, Optional
 from pydantic import BaseModel, Field
 
 from app import config
-from app.sensors import asset_name
+from app.checks import check_sensor_claims, report_observations
+from app.sensors import FEATURES, SENSOR_META, asset_name
 
 PROMPTS = Path(__file__).parent / "prompts"
 SYSTEM_PROMPT = (PROMPTS / "system.md").read_text(encoding="utf-8")
@@ -117,12 +118,28 @@ def _clean(value, default: str, allowed: set[str], aliases: dict[str, str]) -> s
     return v if v in allowed else default
 
 
+# DeepSeek-V4-Flash on Token Factory sometimes glues "aine"/"ainer" onto a word ("steadyaine",
+# "Ps30ainer"), even at temperature 0. Repair it only on sensor codes and direction words.
+_GLITCH = re.compile(r"\b(" + "|".join(sorted({SENSOR_META[s][0] for s in FEATURES}, key=len, reverse=True))
+                     + r"|steady|stable|rising|falling)(?:ainer|aine)\b")
+
+
+def _repair(value):
+    if isinstance(value, str):
+        return _GLITCH.sub(r"\1", value)
+    if isinstance(value, list):
+        return [_repair(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _repair(v) for k, v in value.items()}
+    return value
+
+
 def normalize_raw(raw: dict) -> dict:
     """Fix the small format slips open-weight models make ("High", "next shift", 80 for 0.8).
 
     Only formatting is changed here. The safety rules still run afterwards in apply_guardrails.
     """
-    raw = dict(raw)
+    raw = _repair(dict(raw))
     raw["severity"] = _clean(raw.get("severity"), "warning", {"normal", "warning", "critical"}, {})
     try:
         conf = float(raw.get("confidence", 0.5))
@@ -205,6 +222,12 @@ def apply_guardrails(report: Report, assessment: dict, evidence_ids: set[str]) -
         notes.append("Some causes have no supporting citation; confidence lowered.")
         report.confidence = min(report.confidence, 0.5)
 
+    # 1b. observations must match what the detector measured (catches renamed or reversed sensors)
+    mismatches = check_sensor_claims(report_observations(report), assessment)
+    if mismatches:
+        notes += [f"Sensor claim does not match the detector: {m}" for m in mismatches[:3]]
+        report.confidence = min(report.confidence, 0.5)
+
     # 2. severity can only go UP from what the detector says, never down
     order = ["normal", "warning", "critical"]
     if order.index(report.severity) < order.index(assessment["severity"]):
@@ -260,7 +283,7 @@ def diagnose(assessment: dict, retriever, llm_fn: LLMFn | None = None, verify: b
                      for e in evidence],
     }
     step("Writing the diagnosis on AMD Token Factory (usually 30 to 70 s)...")
-    raw, meta = llm_fn(SYSTEM_PROMPT, json.dumps(payload, indent=2))
+    raw, meta = llm_fn(SYSTEM_PROMPT, json.dumps(payload, separators=(",", ":")))
     step(f"Diagnosis written by {meta.get('model', 'the model')} in {meta.get('latency_s', 0):.0f} s.")
     report = Report.model_validate(normalize_raw(raw))
     report = apply_guardrails(report, assessment, {e["id"] for e in evidence})
@@ -270,7 +293,7 @@ def diagnose(assessment: dict, retriever, llm_fn: LLMFn | None = None, verify: b
         try:
             check, vmeta = llm_fn(VERIFIER_PROMPT, json.dumps(
                 {"report": report.model_dump(exclude={"verification", "guardrail_notes"}),
-                 "detector": assessment, "evidence": payload["evidence"]}, indent=2))
+                 "detector": assessment, "evidence": payload["evidence"]}, separators=(",", ":")))
         except Exception as err:  # keep the report, but treat it as unchecked
             check, vmeta = {"supported": False, "note": f"Verifier could not run: {err}"}, {}
             report.guardrail_notes.append("Verifier unavailable; report treated as unverified.")

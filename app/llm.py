@@ -77,7 +77,8 @@ def complete(messages: list[dict], meta: dict, temperature: float, max_tokens: i
 
 
 # Reasoning models spend tokens in <think> before the JSON, so leave plenty of room.
-def chat_json(system: str, user: str, temperature: float = 0.2, max_tokens: int = 4096,
+# Temperature 0: always the most likely token, so fewer stray words and repeatable runs.
+def chat_json(system: str, user: str, temperature: float = 0.0, max_tokens: int = 4096,
               on_step: Callable[[str], None] | None = None) -> tuple[dict, dict]:
     """Call the model and return (parsed_json, meta). Retries once if the JSON is broken."""
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]

@@ -231,3 +231,75 @@ def test_citations_recovered_from_text_when_list_is_empty():
     assert raw["likely_causes"][0]["citations"] == ["MAN-02"]
     assert raw["likely_causes"][1]["citations"] == ["MAN-05", "INC-2026-014"]
     assert raw["recommended_actions"][0]["citations"] == ["MAN-02"]
+
+
+SPEED_CASE = {"severity": "warning", "top_sensors": [
+    {"code": "NRc", "direction": "rising", "change_over_window": 27.22, "value_now": 8173.21},
+    {"code": "Nc", "direction": "rising", "change_over_window": 29.428, "value_now": 9104.22},
+    {"code": "T30", "direction": "steady", "change_over_window": -0.077, "value_now": 1588.04}]}
+
+
+def test_sensor_check_catches_renamed_sensor():
+    from app.checks import check_sensor_claims
+    problems = check_sensor_claims(["Nf (fan speed) rose 27.2 rpm over 30 cycles"], SPEED_CASE)
+    assert problems and "Nf" in problems[0]
+
+
+def test_sensor_check_catches_wrong_direction_and_number():
+    from app.checks import check_sensor_claims
+    assert check_sensor_claims(["T30 rising over the window"], SPEED_CASE)
+    assert check_sensor_claims(["Nc rose 45.0 rpm over 30 cycles"], SPEED_CASE)
+
+
+def test_sensor_check_accepts_correct_observations():
+    from app.checks import check_sensor_claims
+    good = ["Core speed (Nc, NRc) is drifting upward with T30 steady.",
+            "Nc and NRc rising over 30 cycles (29.4 and 27.2 rpm)",
+            "T30 (HPC outlet temperature) steady at 1588 degR, change -0.08 degR",
+            "If T50 rises after the wash, request a borescope.",
+            "Check P30 and Ps30 trends to confirm.",
+            "T50 is not rising yet."]
+    assert check_sensor_claims(good, SPEED_CASE) == []
+
+
+def test_sensor_check_uses_all_sensors_when_present():
+    from app.checks import check_sensor_claims
+    full = {**SPEED_CASE, "all_sensors": [*SPEED_CASE["top_sensors"],
+            {"code": "P30", "direction": "steady", "change_over_window": 0.01, "value_now": 553.1}]}
+    assert check_sensor_claims(["P30 steady"], full) == []
+    assert check_sensor_claims(["P30 falling"], full)
+
+
+def test_sensor_check_no_false_alarms_from_baseline_run():
+    from app.checks import check_sensor_claims
+    case = {"top_sensors": [
+        {"code": "phi", "direction": "falling", "change_over_window": -0.2, "value_now": 520.9},
+        {"code": "Nf", "direction": "rising", "change_over_window": 0.05, "value_now": 2388.2},
+        {"code": "NRf", "direction": "rising", "change_over_window": 0.04, "value_now": 8136.1}]}
+    assert check_sensor_claims(["phi (fuel flow to Ps30 ratio) is falling, suggesting hot section wear"], case) == []
+    assert check_sensor_claims(["Critical anomaly with falling phi and rising fan speeds"], case) == []
+    assert check_sensor_claims(["rising phi with steady fan speed"], case)  # still catches a real reversal
+
+
+def test_sensor_check_handles_lists_comparisons_and_small_changes():
+    from app.checks import check_sensor_claims
+    case = {"all_sensors": [
+        {"code": "T24", "direction": "rising", "change_over_window": 0.5, "value_now": 643.0},
+        {"code": "T50", "direction": "rising", "change_over_window": 7.5, "value_now": 1420.0},
+        {"code": "P30", "direction": "falling", "change_over_window": -0.49, "value_now": 552.0},
+        {"code": "T30", "direction": "rising", "change_over_window": 5.1, "value_now": 1597.0},
+        {"code": "phi", "direction": "falling", "change_over_window": -0.3, "value_now": 520.0},
+        {"code": "Ps30", "direction": "steady", "change_over_window": 0.077, "value_now": 48.1}]}
+    assert check_sensor_claims(["HPC pattern with rising T24/T50, falling P30"], case) == []
+    assert check_sensor_claims(["T50 is rising faster than T30 (HPC outlet temperature) with a widening "
+                                "exhaust spread, and phi (fuel flow to Ps30 ratio) is falling"], case) == []
+    assert check_sensor_claims(["P30 fell 0.489 psia while Ps30 rose 0.077 psia"], case) == []
+    assert check_sensor_claims(["Ps30 fell slightly"], case)  # wrong sign is still caught
+    assert check_sensor_claims(["T30 steady"], case)  # calling a moving sensor steady is caught
+
+
+def test_glitch_suffix_is_repaired_only_on_codes_and_direction_words():
+    from app.agent import normalize_raw
+    raw = normalize_raw({"summary": "T30 steadyaine, rising Ps30ainer; check the container.",
+                         "severity": "warning", "confidence": 0.7})
+    assert raw["summary"] == "T30 steady, rising Ps30; check the container."

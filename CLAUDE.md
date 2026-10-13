@@ -14,9 +14,9 @@ FaultLens is a maintenance copilot for gas turbine units at a power station. It 
 
 ## Layout
 ```
-app/            runtime (CPU): detector, retriever, LLM client, agent, Streamlit UI
+app/            runtime (CPU): detector, retriever, LLM client, agent, checks (sensor claims vs detector), Streamlit UI
   prompts/      system.md (diagnosis agent), verifier.md (second-pass checker)
-scripts/        download_data, train, build_index (CPU is fine), benchmark_llm (Token Factory)
+scripts/        download_data, train, build_index (CPU is fine), benchmark_llm and eval_diagnosis (Token Factory)
 data/knowledge  synthetic manual (MAN-xx sections) and incidents (INC-xxxx-xxx)
 data/demo       held-out units exported by scripts/train.py for the live demo
 artifacts/      detector.pt, index.npz, chunks.jsonl, metrics.json, llm_benchmark.json

@@ -77,6 +77,20 @@ python -m scripts.benchmark_llm --runs 5             # Token Factory latency
 
 Training uses a GPU automatically if PyTorch sees one.
 
+## How FaultLens keeps the model honest
+
+The model proposes; code checks; a person approves.
+
+1. **Ground it.** The model gets every monitored sensor (direction, change, current value, how unusual), the window length, and the retrieved manual sections and incidents. It does not have to guess what it was not told.
+2. **Check it in code** (`app/agent.py::apply_guardrails`, `app/checks.py`):
+   - citations must be ids from the evidence it was given, and uncited causes lower confidence;
+   - every sensor the report describes must match the detector's code, direction and numbers;
+   - severity can only go up, critical always escalates with a P1 work order, low confidence escalates.
+3. **Check it again with a second model call.** The verifier judges each cause and action against its cited text and the detector output; the verdict is computed in code from the failed checks.
+4. **A person approves** the work order. Nothing is raised automatically.
+
+Both calls run at temperature 0. `python -m scripts.eval_diagnosis` runs 10 fixed cases and counts uncited items, sensor mismatches, verifier failures and time; results are in `artifacts/eval.json`.
+
 ## Data and safety notes
 
 - Sensor data: NASA C-MAPSS FD001, used as a stand-in for gas turbine telemetry.

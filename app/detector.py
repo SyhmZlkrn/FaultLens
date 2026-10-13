@@ -55,6 +55,14 @@ class Detector:
                 "direction": direction,
             })
 
+        all_sensors = []
+        for i, s in enumerate(FEATURES):
+            change, direction = trend(window[s].to_numpy(dtype=float))
+            all_sensors.append({"code": SENSOR_META[s][0], "unit": SENSOR_META[s][2],
+                                "direction": direction, "change_over_window": change,
+                                "value_now": round(float(window[s].iloc[-1]), 3),
+                                "anomaly_z": round(float(z[i]), 2)})
+
         if rul < config.RUL_CRITICAL or ratio > 2.0:
             severity = "critical"
         elif rul < config.RUL_WARNING or ratio > 1.0:
@@ -70,4 +78,5 @@ class Detector:
             "severity": severity,
             "window_cycles": WINDOW,  # change_over_window is measured over this many cycles
             "top_sensors": top,
+            "all_sensors": all_sensors,  # every monitored sensor, so nothing has to be assumed
         }
