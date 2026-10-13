@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -17,11 +18,20 @@ from app.sensors import asset_name
 
 st.set_page_config(page_title="FaultLens", layout="wide")
 SEV_COLOR = {"normal": "green", "warning": "orange", "critical": "red"}
+DEMO_UNIT = 97  # cleanest replay: normal, then warning at cycle 149, critical at 176
 
 
 @st.cache_resource
 def load():
     return Detector(), Retriever(), pd.read_csv(config.DEMO_DATA)
+
+
+def sensor_chart(df: pd.DataFrame, s: dict) -> alt.Chart:
+    """One sensor per chart with its own scale, so a small drift is visible."""
+    return (alt.Chart(df).mark_line().encode(
+        x=alt.X("cycle:Q", title="cycle", scale=alt.Scale(zero=False, nice=False)),
+        y=alt.Y(f"{s['sensor']}:Q", title=s["unit"], scale=alt.Scale(zero=False)),
+    ).properties(title=f"{s['code']} {s['direction']}", height=200))
 
 
 def read_json(path):
@@ -51,20 +61,28 @@ with st.sidebar:
     st.title("FaultLens")
     st.caption("Maintenance copilot for gas turbine units")
     units = sorted(demo["unit"].unique())
-    unit = st.selectbox("Asset", units, format_func=asset_name)
+    default_unit = units.index(DEMO_UNIT) if DEMO_UNIT in units else 0
+    unit = st.selectbox("Asset", units, index=default_unit, format_func=asset_name)
     g = demo[demo["unit"] == unit].sort_values("cycle")
     cycle = st.slider("Replay to cycle", int(g["cycle"].min()) + 29, int(g["cycle"].max()),
                       int(g["cycle"].max()) - 40)
 
     st.divider()
-    st.subheader("Running on AMD")
+    st.subheader("Reasoning on AMD")
     m, b = read_json(config.METRICS_PATH), read_json(config.LLM_BENCH_PATH)
-    st.markdown(
-        f"- Detector trained on **{m.get('device', '?')}** (ROCm) in {m.get('train_seconds', '?')} s\n"
-        f"- RUL test RMSE: {m.get('test_rul_rmse', '?')} cycles\n"
-        f"- Reasoning model: **{config.AMD_MODEL or 'not set'}** via AMD Token Factory\n"
-        f"- Median latency: {b.get('median_latency_s', '?')} s, {b.get('median_tokens_per_s', '?')} tok/s"
-    )
+    last = (st.session_state.get("result") or (None, None, {}))[2]
+    lines = ["- Diagnosis and verifier run on **AMD Token Factory**",
+             f"- Model: **{config.AMD_MODEL or 'not set'}**"]
+    if config.AMD_FALLBACK_MODELS:
+        lines.append(f"- If busy, falls back to: {', '.join(config.AMD_FALLBACK_MODELS)}")
+    if last.get("model"):
+        lines.append(f"- Last diagnosis answered by **{last['model']}** in {last.get('latency_s', 0):.0f} s")
+    if b:
+        lines.append(f"- Benchmark: median {b.get('median_latency_s', '?')} s, "
+                     f"{b.get('median_tokens_per_s', '?')} tok/s")
+    st.markdown("\n".join(lines))
+    st.caption(f"Detector: LSTM models trained on {m.get('device', '?')} in {m.get('train_seconds', '?')} s, "
+               f"remaining life test RMSE {m.get('test_rul_rmse', '?')} cycles (NASA C-MAPSS FD001).")
 
 history = g[g["cycle"] <= cycle]
 try:
@@ -80,16 +98,15 @@ c1.metric("Status", a["severity"].upper())
 c2.metric("Anomaly ratio", a["anomaly_ratio"], help="Above 1.0 is outside the learned healthy range")
 c3.metric("Predicted remaining life", f"{a['predicted_rul_cycles']:.0f} cycles")
 
-top = [s["sensor"] for s in a["top_sensors"]]
-chart = history.tail(80).set_index("cycle")[top]
-chart.columns = [s["code"] for s in a["top_sensors"]]
-st.line_chart(chart)
+recent = history.tail(80)
+for col, s in zip(st.columns(len(a["top_sensors"])), a["top_sensors"]):
+    col.altair_chart(sensor_chart(recent, s), use_container_width=True)
 st.caption("Most abnormal sensors: " + ", ".join(
     f"{s['label']} {s['direction']} ({s['change_over_window']:+} {s['unit']})" for s in a["top_sensors"]))
 
 # ---------- diagnosis ----------
 if st.button("Diagnose", type="primary", disabled=a["severity"] == "normal"):
-    with st.spinner("Retrieving manuals and incidents, reasoning on AMD..."):
+    with st.spinner("Retrieving manuals and incidents, reasoning on AMD Token Factory..."):
         try:
             st.session_state.result = diagnose(a, retriever)
             st.session_state.result_key = (unit, cycle)

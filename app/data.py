@@ -1,4 +1,4 @@
-"""Shared data loading and windowing for training (on AMD GPU) and the app."""
+"""Shared data loading and windowing for training and the app."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -61,3 +61,20 @@ def make_windows(df: pd.DataFrame, scaler: dict, window: int = WINDOW):
             cycles.append(int(g["cycle"].iloc[end - 1]))
     return (np.stack(xs).astype(np.float32), np.array(ruls, dtype=np.float32),
             np.array(units), np.array(cycles))
+
+
+def trend(values: np.ndarray) -> tuple[float, str]:
+    """Change across the window from a straight-line fit, so one noisy reading cannot flip it.
+
+    Returns (change, direction). Direction is "steady" when the fitted change is smaller
+    than the scatter of the readings around the line.
+    """
+    if len(values) < 3:
+        return 0.0, "steady"
+    x = np.arange(len(values))
+    slope, intercept = np.polyfit(x, values, 1)
+    change = float(slope * (len(values) - 1))
+    noise = float(np.std(values - (slope * x + intercept)))
+    if abs(change) <= noise:
+        return round(change, 3), "steady"
+    return round(change, 3), "rising" if change > 0 else "falling"

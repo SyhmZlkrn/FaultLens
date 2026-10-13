@@ -1,4 +1,4 @@
-"""PyTorch models. Trained on AMD Instinct GPUs with ROCm, served on CPU in the app."""
+"""PyTorch models. Trained by scripts/train.py, run on CPU in the app."""
 import torch
 import torch.nn as nn
 

@@ -1,7 +1,7 @@
 """Measure latency and throughput of the AMD Token Factory model on a real diagnosis-sized prompt.
 Results go to artifacts/llm_benchmark.json and show up in the app's AMD panel.
 
-    python -m amd.benchmark_llm --runs 5
+    python -m scripts.benchmark_llm --runs 5
 """
 import argparse
 import json

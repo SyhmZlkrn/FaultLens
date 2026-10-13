@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-# CPU torch keeps the image small. Training happens on AMD GPUs, not in this container.
+# CPU torch keeps the image small. The trained models ship in artifacts/.
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 COPY requirements.txt .
 RUN pip install -r requirements.txt

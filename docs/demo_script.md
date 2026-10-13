@@ -17,7 +17,7 @@ Open "Checks": verifier result and guardrail notes. "The model proposes, code en
 Edit the work order, enter a name, approve.
 
 ## 3:00 AMD (30 s)
-Sidebar AMD panel. Cut to the notebook: check_gpu.py output and rocm-smi, training log with GPU name and seconds, benchmark latency.
+Sidebar AMD panel: the reasoning model served by AMD Token Factory, its measured latency, and the model that answered. Open "Checks" to show the two Token Factory calls (diagnosis and verifier) with tokens and latency.
 
 ## 3:30 Value (20 s)
 Diagnosis in under a minute instead of a manual trend review. Earlier warning turns forced outages into planned work. Next step: connect to a real historian and CMMS.

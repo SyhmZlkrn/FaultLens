@@ -1,4 +1,4 @@
-"""Runs the models trained on AMD GPU against a window of live sensor data."""
+"""Runs the trained models against a window of live sensor data."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 
 from app import config
-from app.data import WINDOW, pad_left, scale
+from app.data import WINDOW, pad_left, scale, trend
 from app.models import LSTMAutoencoder, RULRegressor
 from app.sensors import FEATURES, SENSOR_META, label
 
@@ -47,12 +47,12 @@ class Detector:
         top = []
         for i in np.argsort(-z)[:3]:
             s = FEATURES[i]
-            first, last = float(window[s].iloc[0]), float(window[s].iloc[-1])
+            change, direction = trend(window[s].to_numpy(dtype=float))
             top.append({
                 "sensor": s, "code": SENSOR_META[s][0], "label": label(s),
                 "unit": SENSOR_META[s][2], "anomaly_z": round(float(z[i]), 2),
-                "value_now": round(last, 3), "change_over_window": round(last - first, 3),
-                "direction": "rising" if last > first else "falling",
+                "value_now": round(float(window[s].iloc[-1]), 3), "change_over_window": change,
+                "direction": direction,
             })
 
         if rul < config.RUL_CRITICAL or ratio > 2.0:

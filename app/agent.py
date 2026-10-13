@@ -1,6 +1,6 @@
 """The diagnosis agent.
 
-Pipeline: detector output -> retrieve evidence -> diagnose (LLM on AMD) ->
+Pipeline: detector output -> retrieve evidence -> diagnose (LLM on AMD Token Factory) ->
 enforce rules in code -> verify (second LLM pass) -> draft work order for human approval.
 
 The LLM proposes. Code enforces the safety rules. A person approves.

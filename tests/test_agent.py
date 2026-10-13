@@ -1,7 +1,7 @@
 """Pure-Python tests: no GPU, no network. Run with `pytest -q` from the repo root."""
 import numpy as np
 
-from amd.build_index import incident_chunks, manual_chunks
+from scripts.build_index import incident_chunks, manual_chunks
 from app.agent import Report, apply_guardrails, diagnose
 from app.llm import extract_json
 
@@ -154,3 +154,13 @@ def test_busy_model_falls_back_to_next_token_factory_model(monkeypatch):
     out, meta = llm.chat_json("sys", "user")
     assert out == {"ok": True}
     assert fake.models == ["busy-model", "spare-model"] and meta["model"] == "spare-model"
+
+
+def test_trend_ignores_single_noisy_endpoints():
+    from app.data import trend
+    rng = np.random.default_rng(0)
+    rising = np.linspace(0, 10, 30) + rng.normal(0, 1, 30)
+    rising[-1] = -5.0  # one bad last reading must not flip the direction
+    change, direction = trend(rising)
+    assert direction == "rising" and change > 5
+    assert trend(rng.normal(0, 1, 30))[1] == "steady"

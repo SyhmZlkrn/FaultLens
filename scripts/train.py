@@ -1,11 +1,12 @@
-"""Train the anomaly autoencoder and the RUL model on an AMD GPU (ROCm).
+"""Train the anomaly autoencoder and the RUL model.
 
-Run from the repo root inside the AMD notebook:
-    python -m amd.train --data-dir data/raw --epochs 30
+Runs on CPU in about a minute (uses a GPU automatically if PyTorch sees one). From the repo root:
+    python -m scripts.download_data
+    python -m scripts.train --data-dir data/raw --epochs 30
 
 Writes:
     artifacts/detector.pt        both models + scaler + thresholds
-    artifacts/metrics.json       accuracy, training time, which GPU
+    artifacts/metrics.json       accuracy, training time, which device
     data/demo/demo_units.csv     held-out units for the live demo
 """
 from __future__ import annotations
@@ -111,7 +112,7 @@ def main():
         "sensor_err_mean": err.mean(axis=0).tolist(), "sensor_err_std": err.std(axis=0).tolist(),
         "device_name": device_name, "rul_scale": RUL_CAP,
     }, config.DETECTOR_PATH)
-    metrics = {"device": device_name, "rocm_hip": getattr(torch.version, "hip", None),
+    metrics = {"device": device_name,
                "train_seconds": round(train_seconds, 1), "epochs": args.epochs,
                "train_windows": int(len(X)), "test_rul_rmse": round(rmse, 2),
                "anomaly_threshold": threshold, "holdout_units": [int(u) for u in holdout_ids]}

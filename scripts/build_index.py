@@ -1,6 +1,6 @@
-"""Embed the manual and incident history on the AMD GPU.
+"""Embed the manual and incident history for search.
 
-    python -m amd.build_index
+    python -m scripts.build_index
 
 Manual sections are split on '## [MAN-xx] Title' headings.
 Incidents come from data/knowledge/incidents.jsonl, one record per line.

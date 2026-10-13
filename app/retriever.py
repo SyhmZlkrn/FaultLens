@@ -1,4 +1,4 @@
-"""Search the manual and incident history. Embeddings are built on AMD GPU (amd/build_index.py)."""
+"""Search the manual and incident history. Embeddings are built by scripts/build_index.py."""
 from __future__ import annotations
 
 import json

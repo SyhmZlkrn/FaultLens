@@ -10,7 +10,7 @@ Gas turbines degrade slowly. The warning signs are usually in the sensor data do
 
 ## What FaultLens does
 
-1. **Detects** degradation early with an LSTM autoencoder and a remaining-useful-life model trained on AMD Instinct GPUs.
+1. **Detects** degradation early with an LSTM autoencoder and a remaining-useful-life model.
 2. **Explains** which sensors are abnormal and how, in plain language.
 3. **Finds the evidence**: the relevant manual sections and similar past incidents.
 4. **Recommends** actions, least invasive first, every one cited.
@@ -19,22 +19,24 @@ Gas turbines degrade slowly. The warning signs are usually in the sensor data do
 
 ## Where AMD is used
 
-| Part | AMD technology |
-|---|---|
-| Anomaly + RUL model training | PyTorch on ROCm, AMD Instinct GPU (AMD Developer Cloud notebook) |
-| Embedding the manual and incident history | sentence-transformers on ROCm |
-| Diagnosis and verification reasoning, live in the app | Open model served by AMD Token Factory |
+All reasoning in the live app runs on **AMD Token Factory**, AMD's hosted service for open models (OpenAI-compatible API).
 
-See `artifacts/metrics.json` and `artifacts/llm_benchmark.json` for the GPU used, training time and inference latency.
+| Step | Runs on |
+|---|---|
+| Diagnosis: reads the detector output and the evidence, writes causes, actions and a draft work order as strict JSON | AMD Token Factory (default `DeepSeek-V4.1-Flash`) |
+| Verifier: a second pass that checks every claim against its cited evidence | AMD Token Factory |
+| Fallback when a model is busy | Other AMD Token Factory models, set in `AMD_FALLBACK_MODELS` |
+
+The small detector models and the search index are built on CPU and committed in `artifacts/`, so the app starts without a GPU. `artifacts/llm_benchmark.json` holds the measured Token Factory latency.
 
 ## Architecture
 
 ```
-sensor stream --> [LSTM autoencoder + RUL model]  (trained on AMD GPU)
+sensor stream --> [LSTM autoencoder + RUL model]
                           |
                     anomaly, RUL, top sensors
                           |
-             [retriever: manual + incidents]       (index built on AMD GPU)
+             [retriever: manual + incidents]
                           |
               [diagnosis agent on AMD Token Factory]
                           |
@@ -46,7 +48,7 @@ sensor stream --> [LSTM autoencoder + RUL model]  (trained on AMD GPU)
 ## Quickstart
 
 ```bash
-git clone https://github.com/SyhmZlkrn/faultlens && cd faultlens
+git clone https://github.com/SyhmZlkrn/FaultLens && cd FaultLens
 cp .env.example .env              # fill in AMD Token Factory values
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
@@ -60,19 +62,20 @@ docker build -t faultlens .
 docker run -p 8501:8501 --env-file .env faultlens
 ```
 
-## Reproducing the AMD steps
+Get the Token Factory values by signing in at [notebooks.amd.com/tokenfactory](https://notebooks.amd.com/tokenfactory). No card is needed.
 
-In an AMD AI Notebook (JupyterLab with ROCm), from the repo root:
+## Retraining and benchmarking
+
+The trained files are already in the repo. To rebuild them (about two minutes on a laptop CPU):
 
 ```bash
-pip install -r amd/requirements-rocm.txt
-python amd/check_gpu.py
-python -m amd.train --data-dir data/raw --epochs 30
-python -m amd.build_index
-python -m amd.benchmark_llm --runs 5
+python -m scripts.download_data                      # NASA C-MAPSS FD001 into data/raw
+python -m scripts.train --data-dir data/raw --epochs 30
+python -m scripts.build_index                        # after editing data/knowledge
+python -m scripts.benchmark_llm --runs 5             # Token Factory latency
 ```
 
-Download the data first, see `data/README.md`.
+Training uses a GPU automatically if PyTorch sees one.
 
 ## Data and safety notes
 

@@ -1,0 +1,15 @@
+{
+  "device": "CPU",
+  "train_seconds": 72.2,
+  "epochs": 30,
+  "train_windows": 16797,
+  "test_rul_rmse": 13.75,
+  "anomaly_threshold": 0.2695201635360718,
+  "holdout_units": [
+    96,
+    97,
+    98,
+    99,
+    100
+  ]
+}
