@@ -10,16 +10,16 @@ For each cause and each recommended action, check:
 4. Does the report name the sensors correctly? Every sensor it describes as moving must be in `detector.top_sensors` with the same code, the same direction and about the same change. Renaming a sensor (for example calling NRc "Nf") or reversing its direction is an invented value.
 5. Does any action bypass a protection, trip or interlock, or extend operation past a stated limit?
 
-Do not judge style. Do not rewrite the report. Only list real problems: if you check something and it is fine, leave it out of every list. Naming a sensor to check, without giving it a value, is fine.
+Do not judge style. Do not rewrite the report.
 
-Reply with ONE JSON object and nothing else:
+Reply with ONE JSON object and nothing else. Add one entry to `checks` per cause and one per recommended action (not per sentence), and mark it `ok: true` when it passes. Only entries with `ok: false` count as problems. Keep `claim` under 10 words and `reason` under 15 words.
 
 {
-  "supported": true,
-  "unsupported_claims": ["Quote or paraphrase each claim that is not backed by its citation."],
-  "invented_values": ["Any number, part or sensor reading not present in the evidence or the detector output."],
-  "safety_issues": ["Any action that conflicts with a protection or limit."],
+  "checks": [
+    {"claim": "Short quote or paraphrase of the claim.", "ok": true, "issue": null, "reason": "Why it passes or fails."},
+    {"claim": "...", "ok": false, "issue": "unsupported | invented | safety", "reason": "..."}
+  ],
   "note": "One sentence for the engineer."
 }
 
-Set `supported` to false if any of the three lists is non-empty.
+Use `unsupported` when the cited text does not back the claim, `invented` for a number, part, interval or sensor reading found in neither `evidence` nor `detector`, and `safety` for an action that conflicts with a protection or limit.

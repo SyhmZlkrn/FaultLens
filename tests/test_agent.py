@@ -179,7 +179,7 @@ def test_diagnose_reports_progress_steps():
                 {"calls": 1, "latency_s": 0.1, "model": "fake-model"})
 
     diagnose({**ASSESS, "severity": "warning"}, FakeRetriever(), llm_fn=fake_llm, on_step=steps.append)
-    assert len(steps) == 4 and "fake-model" in steps[2]
+    assert len(steps) == 5 and "fake-model" in steps[2]
 
 
 def test_verifier_sees_detector_observations():
@@ -195,3 +195,39 @@ def test_verifier_sees_detector_observations():
 
     diagnose({**ASSESS, "severity": "warning"}, FakeRetriever(), llm_fn=fake_llm)
     assert seen["detector"]["top_sensors"][0]["code"] == "T30"
+
+
+def test_verifier_verdict_comes_from_failed_checks_only():
+    from app.agent import summarize_verification
+    fine = summarize_verification({"checks": [
+        {"claim": "Nc rose 29.4 rpm", "ok": True, "issue": None, "reason": "in detector"},
+        {"claim": "wash per MAN-02", "ok": True, "issue": None, "reason": "MAN-02 says so"}], "note": "ok"})
+    assert fine["supported"] is True and fine["unsupported_claims"] == [] and fine["checked"] == 2
+    bad = summarize_verification({"checks": [
+        {"claim": "a", "ok": True},
+        {"claim": "escalate on wear metals", "ok": False, "issue": "unsupported", "reason": "not in MAN-09"},
+        {"claim": "torque 40 Nm", "ok": False, "issue": "invented", "reason": "no such value"}]})
+    assert bad["supported"] is False
+    assert len(bad["unsupported_claims"]) == 1 and len(bad["invented_values"]) == 1
+
+
+def test_verifier_rejection_leaves_a_note():
+    def fake_llm(system, user):
+        if "strict reviewer" in system:
+            return {"checks": [{"claim": "x", "ok": False, "issue": "unsupported", "reason": "r"}]}, {"calls": 1}
+        return ({"summary": "s", "severity": "warning", "confidence": 0.9,
+                 "likely_causes": [{"cause": "fouling", "citations": ["MAN-02"]}]}, {"calls": 1})
+
+    report, _, _ = diagnose({**ASSESS, "severity": "warning"}, FakeRetriever(), llm_fn=fake_llm)
+    assert report.confidence == 0.5 and any("Verifier flagged 1" in n for n in report.guardrail_notes)
+
+
+def test_citations_recovered_from_text_when_list_is_empty():
+    from app.agent import normalize_raw
+    raw = normalize_raw({"summary": "s", "severity": "warning", "confidence": 0.7,
+                         "likely_causes": [{"cause": "Fouling (MAN-02 signature)", "citations": []},
+                                           {"cause": "Bearing", "citations": "MAN-05, INC-2026-014"}],
+                         "recommended_actions": [{"step": "Wash per MAN-02", "citations": None}]})
+    assert raw["likely_causes"][0]["citations"] == ["MAN-02"]
+    assert raw["likely_causes"][1]["citations"] == ["MAN-05", "INC-2026-014"]
+    assert raw["recommended_actions"][0]["citations"] == ["MAN-02"]

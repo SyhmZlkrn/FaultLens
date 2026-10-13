@@ -8,6 +8,7 @@ The LLM proposes. Code enforces the safety rules. A person approves.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Callable, Literal, Optional
 
@@ -92,6 +93,24 @@ _ACTION_PRIORITY = {"next shift": "next_shift", "next-shift": "next_shift", "nex
                     "urgent": "immediate", "now": "immediate", "scheduled": "planned"}
 
 
+EVIDENCE_ID = re.compile(r"\b(?:MAN-\d{2}|INC-\d{4}-\d{3})\b")
+
+
+def _citations(item: dict, *text_keys: str) -> list[str]:
+    """The item's citations; if the model left them empty, take ids it wrote in the text instead.
+
+    apply_guardrails still drops any id that was not in the evidence.
+    """
+    cited = item.get("citations") or []
+    if isinstance(cited, str):
+        cited = EVIDENCE_ID.findall(cited)
+    cited = [str(x).strip() for x in cited if str(x).strip()]
+    if not cited:
+        text = " ".join(str(v) for k in text_keys for v in (item.get(k) if isinstance(item.get(k), list) else [item.get(k)]))
+        cited = list(dict.fromkeys(EVIDENCE_ID.findall(text)))
+    return cited
+
+
 def _clean(value, default: str, allowed: set[str], aliases: dict[str, str]) -> str:
     v = str(value or "").strip().lower()
     v = aliases.get(v, v)
@@ -119,7 +138,7 @@ def normalize_raw(raw: dict) -> dict:
     for c in raw["likely_causes"]:
         if isinstance(c, dict) and c.get("cause"):
             c = {**c, "likelihood": _clean(c.get("likelihood"), "medium", {"high", "medium", "low"}, _LIKELIHOOD)}
-            c["citations"] = [str(x) for x in c.get("citations") or []]
+            c["citations"] = _citations(c, "cause", "evidence")
             c["evidence"] = [str(x) for x in c.get("evidence") or []]
             causes.append(c)
     raw["likely_causes"] = causes
@@ -128,7 +147,7 @@ def normalize_raw(raw: dict) -> dict:
         if isinstance(a, dict) and a.get("step"):
             a = {**a, "priority": _clean(a.get("priority"), "next_shift",
                                          {"immediate", "next_shift", "planned"}, _ACTION_PRIORITY)}
-            a["citations"] = [str(x) for x in a.get("citations") or []]
+            a["citations"] = _citations(a, "step")
             actions.append(a)
     raw["recommended_actions"] = actions
     raw["uncertainties"] = [str(u) for u in raw["uncertainties"]]
@@ -152,6 +171,24 @@ def normalize_raw(raw: dict) -> dict:
         raw["work_order"] = None
     raw["summary"] = str(raw.get("summary") or "No summary returned.")
     return raw
+
+
+def summarize_verification(check: dict) -> dict:
+    """Turn the verifier's per-claim checks into the summary the UI shows.
+
+    The verdict is computed here, from the failed checks, rather than trusted from the model:
+    models often list claims they found fine, which would otherwise count as problems.
+    """
+    if "checks" not in check:
+        return check
+    failed = [c for c in check.get("checks") or [] if isinstance(c, dict) and c.get("ok") is False]
+    def pick(kind: str) -> list[str]:
+        return [f"{c.get('claim', '')} ({c.get('reason', '')})" for c in failed if c.get("issue") == kind]
+    other = [f"{c.get('claim', '')} ({c.get('reason', '')})" for c in failed
+             if c.get("issue") not in ("unsupported", "invented", "safety")]
+    return {"supported": not failed, "checked": len(check.get("checks") or []),
+            "unsupported_claims": pick("unsupported") + other, "invented_values": pick("invented"),
+            "safety_issues": pick("safety"), "note": check.get("note", "")}
 
 
 # ---------- guardrails (deterministic) ----------
@@ -237,10 +274,18 @@ def diagnose(assessment: dict, retriever, llm_fn: LLMFn | None = None, verify: b
         except Exception as err:  # keep the report, but treat it as unchecked
             check, vmeta = {"supported": False, "note": f"Verifier could not run: {err}"}, {}
             report.guardrail_notes.append("Verifier unavailable; report treated as unverified.")
+        check = summarize_verification(check)
         report.verification = check
         for k in ("calls", "latency_s", "prompt_tokens", "completion_tokens"):
             meta[k] = meta.get(k, 0) + vmeta.get(k, 0)
         if check.get("supported") is not True:
+            flagged = len(check.get("unsupported_claims") or []) + len(check.get("invented_values") or []) \
+                + len(check.get("safety_issues") or [])
+            if flagged:
+                report.guardrail_notes.append(
+                    f"Verifier flagged {flagged} claim(s); confidence capped at 0.5. See Checks for details.")
             report.confidence = min(report.confidence, 0.5)
             report = apply_guardrails(report, assessment, {e["id"] for e in evidence})
+        step("Check passed: every claim is backed by the evidence or the detector."
+             if check.get("supported") is True else "Check found problems; see Checks below.")
     return report, evidence, meta

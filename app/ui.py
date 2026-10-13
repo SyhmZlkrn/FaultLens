@@ -35,6 +35,10 @@ def sensor_chart(df: pd.DataFrame, s: dict) -> alt.Chart:
     ).properties(title=f"{s['code']} {s['direction']}", height=200))
 
 
+def cites(ids: list[str]) -> str:
+    return f"[{', '.join(ids)}]" if ids else ":orange[(no citation)]"
+
+
 def read_json(path):
     try:
         return json.loads(Path(path).read_text())
@@ -132,13 +136,13 @@ if res and st.session_state.get("result_key") == (unit, cycle):
     with left:
         st.markdown("**Likely causes**")
         for c in report.likely_causes:
-            st.markdown(f"- **{c.cause}** ({c.likelihood}) [{', '.join(c.citations)}]")
+            st.markdown(f"- **{c.cause}** ({c.likelihood}) {cites(c.citations)}")
             for e in c.evidence:
                 st.caption(f"  {e}")
     with right:
         st.markdown("**Recommended actions**")
         for i, act in enumerate(report.recommended_actions, 1):
-            st.markdown(f"{i}. {act.step} `{act.priority}` [{', '.join(act.citations)}]")
+            st.markdown(f"{i}. {act.step} `{act.priority}` {cites(act.citations)}")
     if report.uncertainties:
         st.markdown("**Uncertain about**")
         for u in report.uncertainties:

@@ -68,5 +68,6 @@ class Detector:
             "anomaly_ratio": round(ratio, 2),
             "predicted_rul_cycles": round(rul, 1),
             "severity": severity,
+            "window_cycles": WINDOW,  # change_over_window is measured over this many cycles
             "top_sensors": top,
         }
