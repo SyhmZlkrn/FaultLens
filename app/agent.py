@@ -199,16 +199,22 @@ def apply_guardrails(report: Report, assessment: dict, evidence_ids: set[str]) -
 LLMFn = Callable[[str, str], tuple[dict, dict]]
 
 
-def diagnose(assessment: dict, retriever, llm_fn: LLMFn | None = None, verify: bool = True) -> tuple[Report, list[dict], dict]:
-    """Returns (report, evidence, llm_meta)."""
+def diagnose(assessment: dict, retriever, llm_fn: LLMFn | None = None, verify: bool = True,
+             on_step: Callable[[str], None] | None = None) -> tuple[Report, list[dict], dict]:
+    """Returns (report, evidence, llm_meta). on_step, if given, receives a short progress line per stage."""
+    step = on_step or (lambda _msg: None)
     if llm_fn is None:
-        from app.llm import chat_json as llm_fn
+        from functools import partial
+
+        from app.llm import chat_json
+        llm_fn = partial(chat_json, on_step=step)
 
     if assessment["severity"] == "normal":
         return Report(summary="Unit operating within its learned healthy pattern. No action needed.",
                       severity="normal", confidence=0.9), [], {}
 
     evidence = gather_evidence(retriever, assessment)
+    step(f"Found {len(evidence)} evidence records: {', '.join(e['id'] for e in evidence)}")
     payload = {
         "asset": {"id": asset_name(assessment["unit"]), "type": "Gas turbine (simulated)",
                   "current_cycle": assessment["cycle"]},
@@ -216,15 +222,18 @@ def diagnose(assessment: dict, retriever, llm_fn: LLMFn | None = None, verify: b
         "evidence": [{"id": e["id"], "source": e["source"], "title": e["title"], "text": e["text"]}
                      for e in evidence],
     }
+    step("Writing the diagnosis on AMD Token Factory (usually 30 to 70 s)...")
     raw, meta = llm_fn(SYSTEM_PROMPT, json.dumps(payload, indent=2))
+    step(f"Diagnosis written by {meta.get('model', 'the model')} in {meta.get('latency_s', 0):.0f} s.")
     report = Report.model_validate(normalize_raw(raw))
     report = apply_guardrails(report, assessment, {e["id"] for e in evidence})
 
     if verify:
+        step("Checking every claim against its cited evidence (second AMD Token Factory call)...")
         try:
             check, vmeta = llm_fn(VERIFIER_PROMPT, json.dumps(
                 {"report": report.model_dump(exclude={"verification", "guardrail_notes"}),
-                 "evidence": payload["evidence"]}, indent=2))
+                 "detector": assessment, "evidence": payload["evidence"]}, indent=2))
         except Exception as err:  # keep the report, but treat it as unchecked
             check, vmeta = {"supported": False, "note": f"Verifier could not run: {err}"}, {}
             report.guardrail_notes.append("Verifier unavailable; report treated as unverified.")

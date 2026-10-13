@@ -4,7 +4,8 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
     HF_HOME=/app/.cache/huggingface \
     STREAMLIT_SERVER_HEADLESS=true \
-    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
+    STREAMLIT_SERVER_FILE_WATCHER_TYPE=none
 
 # CPU torch keeps the image small. The trained models ship in artifacts/.
 RUN pip install torch --index-url https://download.pytorch.org/whl/cpu

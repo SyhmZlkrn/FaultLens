@@ -1,6 +1,7 @@
 """FaultLens operator UI.   streamlit run app/ui.py"""
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -100,18 +101,22 @@ c3.metric("Predicted remaining life", f"{a['predicted_rul_cycles']:.0f} cycles")
 
 recent = history.tail(80)
 for col, s in zip(st.columns(len(a["top_sensors"])), a["top_sensors"]):
-    col.altair_chart(sensor_chart(recent, s), use_container_width=True)
+    col.altair_chart(sensor_chart(recent, s), width="stretch")
 st.caption("Most abnormal sensors: " + ", ".join(
     f"{s['label']} {s['direction']} ({s['change_over_window']:+} {s['unit']})" for s in a["top_sensors"]))
 
 # ---------- diagnosis ----------
 if st.button("Diagnose", type="primary", disabled=a["severity"] == "normal"):
-    with st.spinner("Retrieving manuals and incidents, reasoning on AMD Token Factory..."):
+    started = time.perf_counter()
+    with st.status("Diagnosing...", expanded=True) as status:
         try:
-            st.session_state.result = diagnose(a, retriever)
+            st.session_state.result = diagnose(a, retriever, on_step=status.write)
             st.session_state.result_key = (unit, cycle)
+            status.update(label=f"Diagnosis ready in {time.perf_counter() - started:.0f} s",
+                          state="complete", expanded=False)
         except Exception as err:  # show the problem, keep the app alive for the demo
-            st.error(f"Diagnosis could not finish: {err}. Check the AMD endpoint settings and try again.")
+            status.update(label="Diagnosis could not finish", state="error")
+            st.error(f"Diagnosis could not finish: {err}. Press Diagnose to try again.")
 
 res = st.session_state.get("result")
 if res and st.session_state.get("result_key") == (unit, cycle):

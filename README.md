@@ -23,7 +23,7 @@ All reasoning in the live app runs on **AMD Token Factory**, AMD's hosted servic
 
 | Step | Runs on |
 |---|---|
-| Diagnosis: reads the detector output and the evidence, writes causes, actions and a draft work order as strict JSON | AMD Token Factory (default `DeepSeek-V4.1-Flash`) |
+| Diagnosis: reads the detector output and the evidence, writes causes, actions and a draft work order as strict JSON | AMD Token Factory (default `DeepSeek-V4-Flash`) |
 | Verifier: a second pass that checks every claim against its cited evidence | AMD Token Factory |
 | Fallback when a model is busy | Other AMD Token Factory models, set in `AMD_FALLBACK_MODELS` |
 

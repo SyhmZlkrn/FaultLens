@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from typing import Callable
 
 from openai import APIConnectionError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
 
@@ -47,16 +48,21 @@ def extract_json(text: str) -> dict:
     return obj
 
 
-def complete(messages: list[dict], meta: dict, temperature: float, max_tokens: int) -> str:
+def complete(messages: list[dict], meta: dict, temperature: float, max_tokens: int,
+             on_step: Callable[[str], None] | None = None) -> str:
     """One chat call, moving down the model list while models are busy. Updates meta in place."""
     errors = []
-    for model in models():
+    names = models()
+    for i, model in enumerate(names):
         t0 = time.perf_counter()
         try:
             resp = client().chat.completions.create(
                 model=model, messages=messages, temperature=temperature, max_tokens=max_tokens)
         except BUSY_ERRORS as err:
             errors.append(f"{model}: {type(err).__name__}")
+            if on_step and i + 1 < len(names):
+                reason = "is busy" if isinstance(err, RateLimitError) else "did not answer in time"
+                on_step(f"{model} {reason}, switching to {names[i + 1]}...")
             continue
         finally:
             meta["latency_s"] += time.perf_counter() - t0
@@ -71,13 +77,14 @@ def complete(messages: list[dict], meta: dict, temperature: float, max_tokens: i
 
 
 # Reasoning models spend tokens in <think> before the JSON, so leave plenty of room.
-def chat_json(system: str, user: str, temperature: float = 0.2, max_tokens: int = 4096) -> tuple[dict, dict]:
+def chat_json(system: str, user: str, temperature: float = 0.2, max_tokens: int = 4096,
+              on_step: Callable[[str], None] | None = None) -> tuple[dict, dict]:
     """Call the model and return (parsed_json, meta). Retries once if the JSON is broken."""
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     meta = {"model": config.AMD_MODEL, "calls": 0, "latency_s": 0.0,
             "prompt_tokens": 0, "completion_tokens": 0}
     for attempt in range(2):
-        text = complete(messages, meta, temperature, max_tokens)
+        text = complete(messages, meta, temperature, max_tokens, on_step)
         try:
             return extract_json(text), meta
         except (ValueError, json.JSONDecodeError) as err:

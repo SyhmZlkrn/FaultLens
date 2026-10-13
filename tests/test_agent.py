@@ -1,4 +1,6 @@
 """Pure-Python tests: no GPU, no network. Run with `pytest -q` from the repo root."""
+import json
+
 import numpy as np
 
 from scripts.build_index import incident_chunks, manual_chunks
@@ -164,3 +166,32 @@ def test_trend_ignores_single_noisy_endpoints():
     change, direction = trend(rising)
     assert direction == "rising" and change > 5
     assert trend(rng.normal(0, 1, 30))[1] == "steady"
+
+
+def test_diagnose_reports_progress_steps():
+    steps = []
+
+    def fake_llm(system, user):
+        if "strict reviewer" in system:
+            return {"supported": True}, {"calls": 1, "latency_s": 0.1}
+        return ({"summary": "s", "severity": "warning", "confidence": 0.8,
+                 "likely_causes": [{"cause": "fouling", "citations": ["MAN-02"]}]},
+                {"calls": 1, "latency_s": 0.1, "model": "fake-model"})
+
+    diagnose({**ASSESS, "severity": "warning"}, FakeRetriever(), llm_fn=fake_llm, on_step=steps.append)
+    assert len(steps) == 4 and "fake-model" in steps[2]
+
+
+def test_verifier_sees_detector_observations():
+    seen = {}
+
+    def fake_llm(system, user):
+        if "strict reviewer" in system:
+            seen.update(json.loads(user))
+            return {"supported": True}, {"calls": 1, "latency_s": 0.1}
+        return ({"summary": "s", "severity": "warning", "confidence": 0.8,
+                 "likely_causes": [{"cause": "fouling", "citations": ["MAN-02"]}]},
+                {"calls": 1, "latency_s": 0.1})
+
+    diagnose({**ASSESS, "severity": "warning"}, FakeRetriever(), llm_fn=fake_llm)
+    assert seen["detector"]["top_sensors"][0]["code"] == "T30"

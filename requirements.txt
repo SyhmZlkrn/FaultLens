@@ -1,5 +1,5 @@
 # App runtime (CPU). Install torch separately, see README / Dockerfile.
-streamlit>=1.38
+streamlit>=1.65
 altair>=5.0
 openai>=1.40
 pydantic>=2.7
