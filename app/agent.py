@@ -79,11 +79,79 @@ def gather_evidence(retriever, assessment: dict, k_manual: int = 4, k_incidents:
     incidents = [e for e in evidence if e["source"] == "incident"][:k_incidents]
     # always include escalation rules and work order standards
     for must in ("MAN-09", "MAN-10"):
-        if must not in seen:
+        if must not in {m["id"] for m in manual}:
             for c in retriever.chunks:
                 if c["id"] == must:
                     manual.append({**c, "score": None})
     return manual + incidents
+
+
+# ---------- tidy model output before validation ----------
+_LIKELIHOOD = {"likely": "medium", "possible": "low", "very high": "high", "very low": "low"}
+_ACTION_PRIORITY = {"next shift": "next_shift", "next-shift": "next_shift", "nextshift": "next_shift",
+                    "urgent": "immediate", "now": "immediate", "scheduled": "planned"}
+
+
+def _clean(value, default: str, allowed: set[str], aliases: dict[str, str]) -> str:
+    v = str(value or "").strip().lower()
+    v = aliases.get(v, v)
+    return v if v in allowed else default
+
+
+def normalize_raw(raw: dict) -> dict:
+    """Fix the small format slips open-weight models make ("High", "next shift", 80 for 0.8).
+
+    Only formatting is changed here. The safety rules still run afterwards in apply_guardrails.
+    """
+    raw = dict(raw)
+    raw["severity"] = _clean(raw.get("severity"), "warning", {"normal", "warning", "critical"}, {})
+    try:
+        conf = float(raw.get("confidence", 0.5))
+    except (TypeError, ValueError):
+        conf = 0.5
+    if conf > 1.0:
+        conf = conf / 100 if conf <= 100 else 1.0
+    raw["confidence"] = min(max(conf, 0.0), 1.0)
+    for key in ("likely_causes", "recommended_actions", "uncertainties"):
+        if not isinstance(raw.get(key), list):
+            raw[key] = []
+    causes = []
+    for c in raw["likely_causes"]:
+        if isinstance(c, dict) and c.get("cause"):
+            c = {**c, "likelihood": _clean(c.get("likelihood"), "medium", {"high", "medium", "low"}, _LIKELIHOOD)}
+            c["citations"] = [str(x) for x in c.get("citations") or []]
+            c["evidence"] = [str(x) for x in c.get("evidence") or []]
+            causes.append(c)
+    raw["likely_causes"] = causes
+    actions = []
+    for a in raw["recommended_actions"]:
+        if isinstance(a, dict) and a.get("step"):
+            a = {**a, "priority": _clean(a.get("priority"), "next_shift",
+                                         {"immediate", "next_shift", "planned"}, _ACTION_PRIORITY)}
+            a["citations"] = [str(x) for x in a.get("citations") or []]
+            actions.append(a)
+    raw["recommended_actions"] = actions
+    raw["uncertainties"] = [str(u) for u in raw["uncertainties"]]
+    raw["escalate"] = bool(raw.get("escalate", False))
+    wo = raw.get("work_order")
+    if isinstance(wo, dict):
+        wo = dict(wo)
+        wo["title"] = str(wo.get("title") or "Inspect unit")
+        wo["asset"] = str(wo.get("asset") or "")
+        wo["description"] = str(wo.get("description") or "")
+        wo["priority"] = _clean(wo.get("priority"), "p2", {"p1", "p2", "p3"}, {}).upper()
+        try:
+            hrs = wo.get("estimated_downtime_hours")
+            wo["estimated_downtime_hours"] = None if hrs in (None, "") else float(hrs)
+        except (TypeError, ValueError):
+            wo["estimated_downtime_hours"] = None
+        if not isinstance(wo.get("parts_or_tools"), list):
+            wo["parts_or_tools"] = []
+        raw["work_order"] = wo
+    else:
+        raw["work_order"] = None
+    raw["summary"] = str(raw.get("summary") or "No summary returned.")
+    return raw
 
 
 # ---------- guardrails (deterministic) ----------
@@ -149,17 +217,21 @@ def diagnose(assessment: dict, retriever, llm_fn: LLMFn | None = None, verify: b
                      for e in evidence],
     }
     raw, meta = llm_fn(SYSTEM_PROMPT, json.dumps(payload, indent=2))
-    report = Report.model_validate(raw)
+    report = Report.model_validate(normalize_raw(raw))
     report = apply_guardrails(report, assessment, {e["id"] for e in evidence})
 
     if verify:
-        check, vmeta = llm_fn(VERIFIER_PROMPT, json.dumps(
-            {"report": report.model_dump(exclude={"verification", "guardrail_notes"}),
-             "evidence": payload["evidence"]}, indent=2))
+        try:
+            check, vmeta = llm_fn(VERIFIER_PROMPT, json.dumps(
+                {"report": report.model_dump(exclude={"verification", "guardrail_notes"}),
+                 "evidence": payload["evidence"]}, indent=2))
+        except Exception as err:  # keep the report, but treat it as unchecked
+            check, vmeta = {"supported": False, "note": f"Verifier could not run: {err}"}, {}
+            report.guardrail_notes.append("Verifier unavailable; report treated as unverified.")
         report.verification = check
         for k in ("calls", "latency_s", "prompt_tokens", "completion_tokens"):
             meta[k] = meta.get(k, 0) + vmeta.get(k, 0)
-        if not check.get("supported", True):
+        if check.get("supported") is not True:
             report.confidence = min(report.confidence, 0.5)
             report = apply_guardrails(report, assessment, {e["id"] for e in evidence})
     return report, evidence, meta

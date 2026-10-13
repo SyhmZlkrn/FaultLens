@@ -9,7 +9,7 @@ import statistics
 import time
 
 from app import config
-from app.llm import client
+from app.llm import complete
 
 PROMPT = ("A gas turbine shows T30 (HPC outlet temperature) rising 1.4 degR, P30 falling 0.6 psia and "
           "W31 coolant bleed falling over 30 cycles. In about 150 words, list the two most likely causes "
@@ -20,17 +20,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=5)
     args = ap.parse_args()
-    lat, tps = [], []
+    lat, tps, used = [], [], []
     for i in range(args.runs):
+        meta = {"calls": 0, "latency_s": 0.0, "prompt_tokens": 0, "completion_tokens": 0}
         t0 = time.perf_counter()
-        r = client().chat.completions.create(model=config.AMD_MODEL, max_tokens=400,
-                                             messages=[{"role": "user", "content": PROMPT}])
+        complete([{"role": "user", "content": PROMPT}], meta, temperature=0.2, max_tokens=400)
         dt = time.perf_counter() - t0
-        out = r.usage.completion_tokens if r.usage else 0
+        out = meta["completion_tokens"]
         lat.append(dt)
         tps.append(out / dt if dt else 0)
-        print(f"run {i + 1}: {dt:.2f}s  {out} tokens  {out / dt:.1f} tok/s")
-    result = {"model": config.AMD_MODEL, "runs": args.runs,
+        used.append(meta["model"])
+        print(f"run {i + 1}: {meta['model']}  {dt:.2f}s  {out} tokens  {out / dt:.1f} tok/s")
+    result = {"model": statistics.mode(used), "requested_model": config.AMD_MODEL, "runs": args.runs,
               "median_latency_s": round(statistics.median(lat), 2),
               "median_tokens_per_s": round(statistics.median(tps), 1)}
     config.ARTIFACTS.mkdir(exist_ok=True)

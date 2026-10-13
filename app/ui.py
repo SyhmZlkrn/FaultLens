@@ -31,7 +31,20 @@ def read_json(path):
         return {}
 
 
-detector, retriever, demo = load()
+def fail(message: str):
+    """Show a plain message with a retry button instead of a stack trace."""
+    st.error(message)
+    if st.button("Try again"):
+        st.cache_resource.clear()
+        st.rerun()
+    st.stop()
+
+
+try:
+    detector, retriever, demo = load()
+except Exception as err:  # missing or broken artifacts must not crash the demo
+    fail(f"FaultLens could not load its model files ({type(err).__name__}: {err}). "
+         "Check that artifacts/ and data/demo/ are present, then try again.")
 
 # ---------- sidebar ----------
 with st.sidebar:
@@ -54,7 +67,11 @@ with st.sidebar:
     )
 
 history = g[g["cycle"] <= cycle]
-a = detector.assess(history)
+try:
+    a = detector.assess(history)
+except Exception as err:
+    fail(f"The detector could not assess {asset_name(unit)} at cycle {cycle} ({err}). "
+         "Try another cycle or asset.")
 
 # ---------- detector ----------
 st.header(f"{asset_name(unit)} at cycle {cycle}")

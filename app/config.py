@@ -10,6 +10,9 @@ load_dotenv(ROOT / ".env")
 AMD_BASE_URL = os.getenv("AMD_BASE_URL", "")
 AMD_API_KEY = os.getenv("AMD_API_KEY", "")
 AMD_MODEL = os.getenv("AMD_MODEL", "")
+# Other Token Factory models to try, in order, when the main one is busy. Comma separated.
+AMD_FALLBACK_MODELS = [m.strip() for m in os.getenv("AMD_FALLBACK_MODELS", "").split(",") if m.strip()]
+LLM_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "90"))
 
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
 
