@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from typing import Callable
 
@@ -11,19 +12,34 @@ from openai import APIConnectionError, APITimeoutError, InternalServerError, Ope
 from app import config
 
 _client: OpenAI | None = None
+_client_lock = threading.Lock()
+
+_circuit_failures = 0
+_circuit_open_until = 0.0
+CIRCUIT_MAX_FAILURES = 4
+CIRCUIT_COOLDOWN_S = 60.0
 
 # Errors that mean "this model is busy or down right now", so the next Token Factory model is tried.
 BUSY_ERRORS = (RateLimitError, APITimeoutError, APIConnectionError, InternalServerError)
 
 
+def reset_circuit() -> None:
+    """Reset the circuit breaker failure counter and cooldown."""
+    global _circuit_failures, _circuit_open_until
+    _circuit_failures = 0
+    _circuit_open_until = 0.0
+
+
 def client() -> OpenAI:
     global _client
     if _client is None:
-        if not (config.AMD_BASE_URL and config.AMD_API_KEY and config.AMD_MODEL):
-            raise RuntimeError("Set AMD_BASE_URL, AMD_API_KEY and AMD_MODEL in .env")
-        # No hidden retries: a busy model should fail fast and fall through to the next one.
-        _client = OpenAI(base_url=config.AMD_BASE_URL, api_key=config.AMD_API_KEY,
-                         timeout=config.LLM_TIMEOUT_S, max_retries=0)
+        with _client_lock:
+            if _client is None:
+                if not (config.AMD_BASE_URL and config.AMD_API_KEY and config.AMD_MODEL):
+                    raise RuntimeError("Set AMD_BASE_URL, AMD_API_KEY and AMD_MODEL in .env")
+                # No hidden retries: a busy model should fail fast and fall through to the next one.
+                _client = OpenAI(base_url=config.AMD_BASE_URL, api_key=config.AMD_API_KEY,
+                                 timeout=config.LLM_TIMEOUT_S, max_retries=0)
     return _client
 
 
@@ -51,6 +67,10 @@ def extract_json(text: str) -> dict:
 def complete(messages: list[dict], meta: dict, temperature: float, max_tokens: int,
              on_step: Callable[[str], None] | None = None) -> str:
     """One chat call, moving down the model list while models are busy. Updates meta in place."""
+    global _circuit_failures, _circuit_open_until
+    if time.monotonic() < _circuit_open_until:
+        raise RuntimeError("AMD Token Factory circuit is OPEN due to repeated failures. Cooling down.")
+
     errors = []
     names = models()
     for i, model in enumerate(names):
@@ -66,12 +86,17 @@ def complete(messages: list[dict], meta: dict, temperature: float, max_tokens: i
             continue
         finally:
             meta["latency_s"] += time.perf_counter() - t0
+        _circuit_failures = 0
         meta["calls"] += 1
         meta["model"] = model
         if resp.usage:
             meta["prompt_tokens"] += resp.usage.prompt_tokens or 0
             meta["completion_tokens"] += resp.usage.completion_tokens or 0
         return resp.choices[0].message.content or ""
+
+    _circuit_failures += 1
+    if _circuit_failures >= CIRCUIT_MAX_FAILURES:
+        _circuit_open_until = time.monotonic() + CIRCUIT_COOLDOWN_S
     raise RuntimeError("All AMD Token Factory models are busy right now (" + "; ".join(errors)
                        + "). Wait a minute and try again.")
 

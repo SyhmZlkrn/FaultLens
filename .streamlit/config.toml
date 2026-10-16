@@ -1,3 +1,13 @@
 [client]
 # Hide Streamlit's own "Deploy" menu; operators only need the app.
 toolbarMode = "minimal"
+
+# "Instrument panel" theme. Graphite canvas, white surfaces, one technical accent.
+# Status colors (green/amber/red) are reserved for unit health and live in CSS.
+[theme]
+primaryColor = "#0E7490"
+backgroundColor = "#F1F4F8"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#0F172A"
+font = "sans serif"
+base = "light"

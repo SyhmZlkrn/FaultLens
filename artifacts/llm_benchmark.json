@@ -1,7 +1,7 @@
 {
   "model": "DeepSeek-V4-Flash",
   "requested_model": "DeepSeek-V4-Flash",
-  "runs": 3,
-  "median_latency_s": 11.09,
-  "median_tokens_per_s": 22.2
+  "runs": 1,
+  "median_latency_s": 27.42,
+  "median_tokens_per_s": 8.4
 }

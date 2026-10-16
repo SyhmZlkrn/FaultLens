@@ -16,7 +16,10 @@ class Retriever:
             self.chunks = [json.loads(line) for line in f]
         if encoder is None:
             from sentence_transformers import SentenceTransformer
-            encoder = SentenceTransformer(model_name, device="cpu")
+            try:
+                encoder = SentenceTransformer(model_name, device="cpu", local_files_only=True)
+            except Exception:
+                encoder = SentenceTransformer(model_name, device="cpu")
         self.encoder = encoder
 
     def search(self, query: str, k: int = 4, source: str | None = None) -> list[dict]:

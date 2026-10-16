@@ -15,7 +15,7 @@ from app.sensors import FEATURES, SENSOR_META, label
 
 class Detector:
     def __init__(self, path: str | Path = config.DETECTOR_PATH):
-        ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        ckpt = torch.load(path, map_location="cpu", weights_only=True)
         n = len(FEATURES)
         self.ae = LSTMAutoencoder(n)
         self.ae.load_state_dict(ckpt["autoencoder"])
